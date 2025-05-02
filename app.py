@@ -13,6 +13,7 @@ from financial_research_agent.manager import FinancialResearchManager
 from agents import set_default_openai_key
 from dotenv import load_dotenv
 load_dotenv()
+
 set_default_openai_key(os.getenv("OPENAI_API_KEY"))
 
 # -----------------------------------------------------------------------------

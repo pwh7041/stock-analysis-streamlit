@@ -1,163 +1,82 @@
-import yfinance as yf
-from typing import Dict, Any, Optional, List
+import os, requests, time, logging
+from typing import Dict, Optional
 from pydantic import BaseModel, Field
-from datetime import datetime
-from agents import function_tool
+
+from pathlib import Path
+from dotenv import load_dotenv
+dotenv_path = Path(__file__).resolve().parent.parent.parent / ".env"
+load_dotenv(dotenv_path)
+
+API_KEY = "rkHLYmPKpVVlTNqySEKMmW8gxVkNMGC3"
+API_KEY = os.getenv("FMP_API_KEY")
+if not API_KEY:
+    raise RuntimeError("Set FMP_API_KEY in the .env file")
+
+def safe_get(url, tries=3, pause=3):
+    for i in range(tries):
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            return r.json()
+        if r.status_code in (429, 403):  # rate limit / exhausted
+            wait = pause * (i + 1)
+            logging.warning(f"{r.status_code} on {url}. Retry in {wait}s")
+            time.sleep(wait)
+            continue
+        r.raise_for_status()
+    return None
+
+def stmt(endpoint, symbol):
+    url = (f"https://financialmodelingprep.com/api/v3/{endpoint}/"
+           f"{symbol}?period=annual&limit=1&apikey={API_KEY}")
+    data = safe_get(url)
+    if isinstance(data, list) and data:
+        rec = data[0]
+        numeric = {k: float(v) for k, v in rec.items() if isinstance(v, (int, float))}
+        return rec.get("date"), numeric
+    return None, {}
 
 class CompanyInfo(BaseModel):
-    """Company information model"""
-    ticker: str
-    name: Optional[str] = None
-    industry: Optional[str] = None
-    sector: Optional[str] = None
-    market_cap: Optional[float] = None
-    currency: str = "USD"
-    exchange: Optional[str] = None
-    country: Optional[str] = None
-    Stock_price: Optional[float] = None
+    ticker: str; name: Optional[str]=None; industry: Optional[str]=None
+    sector: Optional[str]=None; market_cap: Optional[float]=None
+    currency: Optional[str]=None; exchange: Optional[str]=None
+    country: Optional[str]=None; stock_price: Optional[float]=None
 
 class FinancialStatementData(BaseModel):
-    """Model for a single financial statement"""
-    date: str
-    data: Dict[str, Optional[float]] = Field(default_factory=dict)
+    date: Optional[str]=None; data: Dict[str, Optional[float]] = Field(default_factory=dict)
 
 class FinancialStatements(BaseModel):
-    """Container for all financial statements"""
-    income_statement: Optional[FinancialStatementData] = None
-    balance_sheet: Optional[FinancialStatementData] = None
-    cash_flow: Optional[FinancialStatementData] = None
+    income_statement: Optional[FinancialStatementData]=None
+    balance_sheet: Optional[FinancialStatementData]=None
+    cash_flow: Optional[FinancialStatementData]=None
 
 class FinancialData(BaseModel):
-    """Top-level model for all financial data"""
-    company_info: CompanyInfo
-    financial_statements: FinancialStatements
-    status: str = "success"
-    error: Optional[str] = None
+    company_info: CompanyInfo; financial_statements: FinancialStatements
+    status: str="success"; error: Optional[str]=None
 
-@function_tool
-def get_latest_financials(ticker_symbol: str) -> FinancialData:
-    """
-    Pull latest annual financial statements for a company listed in US or Canada.
-    Returns data in a Pydantic model format.
-    
-    Parameters:
-    - ticker_symbol: Stock ticker symbol (add .TO for TSX listed companies)
-    
-    Returns:
-    - FinancialData Pydantic model containing the latest financial statements
-    """
+#@function_tool
+def get_latest_financials(ticker: str) -> FinancialData:
+    ci = CompanyInfo(ticker=ticker)
     try:
-        # Get ticker data
-        ticker = yf.Ticker(ticker_symbol)
-        
-        # Initialize company info
-        company_info = CompanyInfo(ticker=ticker_symbol)
-        
-        # Get company info
-        try:
-            info = ticker.info
-            company_info.name = info.get("shortName") or info.get("longName")
-            company_info.industry = info.get("industry")
-            company_info.sector = info.get("sector")
-            company_info.market_cap = info.get("marketCap")
-            company_info.currency = info.get("currency", "USD")
-            company_info.exchange = info.get("exchange")
-            company_info.country = info.get("country")
-            company_info.stock_price = info.get("regularMarketPrice")
-        except Exception:
-            pass
-        
-        # Initialize financial statements
-        financial_statements = FinancialStatements()
-        
-        # Get income statement (latest year only)
-        try:
-            income_df = ticker.income_stmt
-            if income_df is not None and not income_df.empty:
-                latest_period = income_df.columns[0]
-                period_str = latest_period.strftime('%Y-%m-%d') if hasattr(latest_period, 'strftime') else str(latest_period)
-                
-                # Extract and clean data
-                statement_data = {}
-                for k, v in income_df.iloc[:, 0].items():
-                    if v is not None:
-                        # Convert numpy types to native Python types if needed
-                        if hasattr(v, 'item'):
-                            v = v.item()
-                        try:
-                            statement_data[k] = float(v)
-                        except (ValueError, TypeError):
-                            pass
-                
-                financial_statements.income_statement = FinancialStatementData(
-                    date=period_str,
-                    data=statement_data
-                )
-        except Exception:
-            pass
-        
-        # Get balance sheet (latest year only)
-        try:
-            balance_df = ticker.balance_sheet
-            if balance_df is not None and not balance_df.empty:
-                latest_period = balance_df.columns[0]
-                period_str = latest_period.strftime('%Y-%m-%d') if hasattr(latest_period, 'strftime') else str(latest_period)
-                
-                # Extract and clean data
-                statement_data = {}
-                for k, v in balance_df.iloc[:, 0].items():
-                    if v is not None:
-                        if hasattr(v, 'item'):
-                            v = v.item()
-                        try:
-                            statement_data[k] = float(v)
-                        except (ValueError, TypeError):
-                            pass
-                
-                financial_statements.balance_sheet = FinancialStatementData(
-                    date=period_str,
-                    data=statement_data
-                )
-        except Exception:
-            pass
-        
-        # Get cash flow statement (latest year only)
-        try:
-            cash_df = ticker.cashflow
-            if cash_df is not None and not cash_df.empty:
-                latest_period = cash_df.columns[0]
-                period_str = latest_period.strftime('%Y-%m-%d') if hasattr(latest_period, 'strftime') else str(latest_period)
-                
-                # Extract and clean data
-                statement_data = {}
-                for k, v in cash_df.iloc[:, 0].items():
-                    if v is not None:
-                        if hasattr(v, 'item'):
-                            v = v.item()
-                        try:
-                            statement_data[k] = float(v)
-                        except (ValueError, TypeError):
-                            pass
-                
-                financial_statements.cash_flow = FinancialStatementData(
-                    date=period_str,
-                    data=statement_data
-                )
-        except Exception:
-            pass
-        
-        # Create and return the full financial data model
-        return FinancialData(
-            company_info=company_info,
-            financial_statements=financial_statements
-        )
-        
-    except Exception as e:
-        # Return error response in the same Pydantic format
-        return FinancialData(
-            status="error",
-            error=str(e),
-            company_info=CompanyInfo(ticker=ticker_symbol),
-            financial_statements=FinancialStatements()
-        )
+        prof = safe_get(f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={API_KEY}")
+        if prof:
+            p = prof[0]
+            ci.name = p.get("companyName"); ci.industry = p.get("industry")
+            ci.sector = p.get("sector"); ci.market_cap = p.get("mktCap")
+            ci.currency = p.get("currency"); ci.exchange = p.get("exchangeShortName")
+            ci.country = p.get("country"); ci.stock_price = p.get("price")
 
+        fs = FinancialStatements()
+        for tag, ep in (("income_statement","income-statement"),
+                        ("balance_sheet","balance-sheet-statement"),
+                        ("cash_flow","cash-flow-statement")):
+            date, data = stmt(ep, ticker)
+            if data:
+                setattr(fs, tag, FinancialStatementData(date=date, data=data))
+
+        status = "success" if any(vars(fs).values()) else "empty"
+        return FinancialData(company_info=ci, financial_statements=fs, status=status)
+
+    except Exception as e:
+        logging.error(e)
+        return FinancialData(company_info=ci, financial_statements=FinancialStatements(),
+                             status="error", error=str(e))
