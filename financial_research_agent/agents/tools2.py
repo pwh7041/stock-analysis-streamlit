@@ -1,13 +1,13 @@
 import os, requests, time, logging
 from typing import Dict, Optional
 from pydantic import BaseModel, Field
+from agents import function_tool
 
 from pathlib import Path
 from dotenv import load_dotenv
 dotenv_path = Path(__file__).resolve().parent.parent.parent / ".env"
 load_dotenv(dotenv_path)
 
-API_KEY = "rkHLYmPKpVVlTNqySEKMmW8gxVkNMGC3"
 API_KEY = os.getenv("FMP_API_KEY")
 if not API_KEY:
     raise RuntimeError("Set FMP_API_KEY in the .env file")
@@ -53,7 +53,7 @@ class FinancialData(BaseModel):
     company_info: CompanyInfo; financial_statements: FinancialStatements
     status: str="success"; error: Optional[str]=None
 
-#@function_tool
+@function_tool
 def get_latest_financials(ticker: str) -> FinancialData:
     ci = CompanyInfo(ticker=ticker)
     try:

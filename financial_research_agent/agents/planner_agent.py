@@ -14,7 +14,7 @@ PROMPT = (
     f"Completely ignore anything older. If necessary, include the year in your search queries, "
     f"for example 'Tesla earnings {CURRENT_YEAR}' or 'Microsoft {LAST_YEAR} annual report'. "
     f"Aim for recent headlines, earnings calls or 10‑K snippets, analyst commentary, and industry background. "
-    f"Output 1 search term to query for."
+    f"Output 3 to 5 search terms to query for."
     
 )
 '''
